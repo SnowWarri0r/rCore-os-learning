@@ -2,13 +2,17 @@
 #![no_main]
 #![feature(panic_info_message)]
 
+#[macro_use]
 mod console;
+mod sync;
+pub mod batch;
 mod lang_items;
 mod sbi;
 
 use core::arch::global_asm;
 
 global_asm!(include_str!("entry.asm"));
+global_asm!(include_str!("link_app.S"));
 // 防止编译器对函数符号混淆
 #[no_mangle]
 pub fn rust_main() {
