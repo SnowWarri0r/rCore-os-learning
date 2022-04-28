@@ -1,8 +1,9 @@
 LOG ?= INFO
 run: clean build
 clean:
-	@rm -rf target
+	@cargo clean
 build:
+	@cd ../user && make build
 	@LOG=$(LOG) cargo build --release
 	@rust-objcopy --strip-all target/riscv64gc-unknown-none-elf/release/os -O binary target/riscv64gc-unknown-none-elf/release/os.bin
 	@qemu-system-riscv64 \

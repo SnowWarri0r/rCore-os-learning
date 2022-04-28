@@ -4,10 +4,12 @@
 
 #[macro_use]
 mod console;
-mod sync;
 pub mod batch;
 mod lang_items;
 mod sbi;
+mod sync;
+mod syscall;
+mod trap;
 
 use core::arch::global_asm;
 
@@ -23,22 +25,27 @@ pub fn rust_main() {
         fn edata();
         fn sbss();
         fn ebss();
-        fn sstack();
-        fn estack();
         fn srodata();
         fn erodata();
     }
     clear_bss();
-    info!(".text, [{:#x}, {:#x})", stext as usize, etext as usize);
-    info!(".data [{:#x}, {:#x})", sdata as usize, edata as usize);
-    info!(".bss [{:#x}, {:#x})", sbss as usize, ebss as usize);
-    info!(".rodata [{:#x}, {:#x})", srodata as usize, erodata as usize);
-    debug!("boot_stack [{:#x}, {:#x})", sstack as usize, estack as usize);
-    info!("Hello, World!");
-    warn!("Hello, World!");
-    error!("Hello, World!");
-    trace!("Hello, World!");
-    panic!("Shutdown machine!");
+    info!(
+        "[kernel] .text, [{:#x}, {:#x})",
+        stext as usize, etext as usize
+    );
+    info!(
+        "[kernel] .data [{:#x}, {:#x})",
+        sdata as usize, edata as usize
+    );
+    info!("[kernel] .bss [{:#x}, {:#x})", sbss as usize, ebss as usize);
+    info!(
+        "[kernel] .rodata [{:#x}, {:#x})",
+        srodata as usize, erodata as usize
+    );
+    println!("[kernel] Hello, world!");
+    trap::init();
+    batch::init();
+    batch::run_next_app();
 }
 
 fn clear_bss() {
