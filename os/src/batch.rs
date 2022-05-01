@@ -6,7 +6,7 @@ use lazy_static::lazy_static;
 const MAX_APP_NUM: usize = 16;
 const APP_BASE_ADDRESS: usize = 0x80400000;
 const APP_SIZE_LIMIT: usize = 0x20000;
-const USER_STACK_SIZE: usize = 4096 * 2;
+const USER_STACK_SIZE: usize = 4096;
 const KERNEL_STACK_SIZE: usize = 4096 * 2;
 
 #[repr(align(4096))]
@@ -137,4 +137,15 @@ pub fn run_next_app() -> ! {
         )) as *const _ as usize);
     }
     panic!("Unreachable in batch::run_current_app!");
+}
+
+pub fn check_invalid(buf: &*const u8, len: &usize) -> bool {
+    // 用户栈中的数据 需要程序利用用户栈
+    if (*buf as usize) >= (USER_STACK.data.as_ptr() as usize) && (*buf as usize) + len <= USER_STACK.get_sp() {
+        return false;
+    // 用户程序段中的数据，data段，text段，rodata段之类的
+    } else if (*buf as usize) >= APP_BASE_ADDRESS && (*buf as usize) + len <= APP_BASE_ADDRESS + APP_SIZE_LIMIT {
+        return false;
+    }
+    true
 }
