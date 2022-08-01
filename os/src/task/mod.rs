@@ -20,7 +20,7 @@ use lazy_static::lazy_static;
 use crate::{
     config::MAX_APP_NUM,
     loader::{get_num_app, init_app_cx},
-    sync::UPSafeCell,
+    sync::UPSafeCell, timer::set_next_trigger,
 };
 
 use self::{switch::__switch, task::*};
@@ -106,6 +106,7 @@ impl TaskManager {
             let next_task_cx_ptr = &inner.tasks[next].task_cx as *const TaskContext;
             drop(inner);
             // before this, we should drop local variables that must be dropped manually
+            // 在当前__switch执行完返回后，还没有退出该函数，此时inner还不可借用，而程序如果在此时挂起或退出，那么就会触发下一次借用，从而就会触发panic
             unsafe {
                 __switch(current_task_cx_ptr, next_task_cx_ptr);
             }
@@ -125,11 +126,13 @@ fn run_next_task() {
 
 pub fn suspend_current_and_run_next() {
     mark_current_suspended();
+    set_next_trigger();
     run_next_task();
 }
 
 pub fn exit_current_and_run_next() {
     mark_current_exited();
+    set_next_trigger();
     run_next_task();
 }
 

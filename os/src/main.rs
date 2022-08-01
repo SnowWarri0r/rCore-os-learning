@@ -12,6 +12,7 @@ mod syscall;
 mod trap;
 mod config;
 mod loader;
+mod timer;
 
 use core::arch::global_asm;
 
@@ -47,6 +48,8 @@ pub fn rust_main() {
     println!("[kernel] Hello, world!");
     trap::init();
     loader::load_apps();
+    trap::enable_timer_interrupt();
+    timer::set_next_trigger();
     task::run_first_task();
 }
 
