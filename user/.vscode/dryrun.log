@@ -1,0 +1,5 @@
+make --dry-run --always-make --keep-going --print-directory
+make: Entering directory '/home/sn0w/os-learning/user'
+python3 build.py
+make: Leaving directory '/home/sn0w/os-learning/user'
+ 

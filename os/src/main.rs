@@ -4,12 +4,14 @@
 
 #[macro_use]
 mod console;
-pub mod batch;
+mod task;
 mod lang_items;
 mod sbi;
 mod sync;
 mod syscall;
 mod trap;
+mod config;
+mod loader;
 
 use core::arch::global_asm;
 
@@ -44,8 +46,8 @@ pub fn rust_main() {
     );
     println!("[kernel] Hello, world!");
     trap::init();
-    batch::init();
-    batch::run_next_app();
+    loader::load_apps();
+    task::run_first_task();
 }
 
 fn clear_bss() {
