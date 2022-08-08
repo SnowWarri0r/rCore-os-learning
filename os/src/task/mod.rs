@@ -14,13 +14,14 @@ mod switch;
 #[allow(clippy::module_inception)]
 mod task;
 
+use alloc::vec::Vec;
 use context::TaskContext;
 use lazy_static::lazy_static;
 
 use crate::{
-    config::MAX_APP_NUM,
-    loader::{get_num_app, init_app_cx},
-    sync::UPSafeCell, timer::set_next_trigger,
+    loader::{get_num_app, get_app_data},
+    sync::UPSafeCell,
+    timer::{get_time_us, set_next_trigger}, trap::TrapContext,
 };
 
 use self::{switch::__switch, task::*};
@@ -31,20 +32,18 @@ pub struct TaskManager {
 }
 
 pub struct TaskManagerInner {
-    tasks: [TaskControlBlock; MAX_APP_NUM],
+    tasks: Vec<TaskControlBlock>,
     current_task: usize,
 }
 
 lazy_static! {
     pub static ref TASK_MANAGER: TaskManager = {
+        println!("init TASK_MANAGER");
         let num_app = get_num_app();
-        let mut tasks = [TaskControlBlock {
-            task_cx: TaskContext::zero_init(),
-            task_status: TaskStatus::UnInit,
-        }; MAX_APP_NUM];
+        println!("num_app = {}", num_app);
+        let mut tasks: Vec<TaskControlBlock> = Vec::new();
         for i in 0..num_app {
-            tasks[i].task_cx = TaskContext::goto_restore(init_app_cx(i));
-            tasks[i].task_status = TaskStatus::Ready;
+            tasks.push(TaskControlBlock::new(get_app_data(i), i));
         }
         TaskManager {
             num_app,
@@ -68,10 +67,7 @@ impl TaskManager {
         let mut _unused = TaskContext::zero_init();
         // before this, we should drop local variables that must be dropped manually
         unsafe {
-            __switch(
-                &mut _unused as *mut TaskContext,
-                next_task_cx_ptr,
-            );
+            __switch(&mut _unused as *mut TaskContext, next_task_cx_ptr);
         }
         panic!("unreachable in run_first_task!");
     }
@@ -97,6 +93,7 @@ impl TaskManager {
     }
 
     fn run_next_task(&self) {
+        let cur = get_time_us();
         if let Some(next) = self.find_next_task() {
             let mut inner = self.inner.exclusive_access();
             let current = inner.current_task;
@@ -105,6 +102,7 @@ impl TaskManager {
             let current_task_cx_ptr = &mut inner.tasks[current].task_cx as *mut TaskContext;
             let next_task_cx_ptr = &inner.tasks[next].task_cx as *const TaskContext;
             drop(inner);
+            info!("before switch using: {} us", get_time_us() - cur);
             // before this, we should drop local variables that must be dropped manually
             // 在当前__switch执行完返回后，还没有退出该函数，此时inner还不可借用，而程序如果在此时挂起或退出，那么就会触发下一次借用，从而就会触发panic
             unsafe {
@@ -114,6 +112,17 @@ impl TaskManager {
         } else {
             panic!("All applications completed!");
         }
+    }
+    fn get_current_token(&self) -> usize {
+        let inner = self.inner.exclusive_access();
+        let current = inner.current_task;
+        inner.tasks[current].get_user_token()
+    }
+
+    fn get_current_trap_cx(&self) -> &mut TrapContext {
+        let inner = self.inner.exclusive_access();
+        let current = inner.current_task;
+        inner.tasks[current].get_trap_cx()
     }
 }
 pub fn run_first_task() {
@@ -142,4 +151,12 @@ fn mark_current_suspended() {
 
 fn mark_current_exited() {
     TASK_MANAGER.mark_current_exited();
+}
+
+pub fn current_user_token() -> usize {
+    TASK_MANAGER.get_current_token()
+}
+
+pub fn current_trap_cx() -> &'static mut TrapContext {
+    TASK_MANAGER.get_current_trap_cx()
 }

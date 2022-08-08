@@ -1,18 +1,26 @@
 #![no_std]
 #![no_main]
 #![feature(panic_info_message)]
+#![feature(alloc_error_handler)]
+
+extern crate alloc;
+extern crate xmas_elf;
+
+#[macro_use]
+extern crate bitflags;
 
 #[macro_use]
 mod console;
-mod task;
+mod config;
 mod lang_items;
+mod loader;
+mod mm;
 mod sbi;
 mod sync;
 mod syscall;
-mod trap;
-mod config;
-mod loader;
+mod task;
 mod timer;
+mod trap;
 
 use core::arch::global_asm;
 
@@ -20,37 +28,17 @@ global_asm!(include_str!("entry.asm"));
 global_asm!(include_str!("link_app.S"));
 // 防止编译器对函数符号混淆
 #[no_mangle]
-pub fn rust_main() {
-    extern "C" {
-        fn stext();
-        fn etext();
-        fn sdata();
-        fn edata();
-        fn sbss();
-        fn ebss();
-        fn srodata();
-        fn erodata();
-    }
+pub fn rust_main() -> ! {
     clear_bss();
-    info!(
-        "[kernel] .text, [{:#x}, {:#x})",
-        stext as usize, etext as usize
-    );
-    info!(
-        "[kernel] .data [{:#x}, {:#x})",
-        sdata as usize, edata as usize
-    );
-    info!("[kernel] .bss [{:#x}, {:#x})", sbss as usize, ebss as usize);
-    info!(
-        "[kernel] .rodata [{:#x}, {:#x})",
-        srodata as usize, erodata as usize
-    );
     println!("[kernel] Hello, world!");
+    mm::init();
+    println!("[kernel] back to world!");
+    mm::remap_test();
     trap::init();
-    loader::load_apps();
     trap::enable_timer_interrupt();
     timer::set_next_trigger();
     task::run_first_task();
+    panic!("Unreachable in rust_main!");
 }
 
 fn clear_bss() {

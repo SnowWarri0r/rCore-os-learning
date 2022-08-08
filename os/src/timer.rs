@@ -1,6 +1,7 @@
 use riscv::register::time;
 use crate::{config::CLOCK_FREQ, sbi::set_timer};
 const TICKS_PER_SEC: usize = 100;
+const MSEC_PER_SEC: usize = 1000;
 const MICRO_PER_SEC: usize = 1_000_000;
 
 pub fn get_time() -> usize {
@@ -9,6 +10,10 @@ pub fn get_time() -> usize {
 
 pub fn get_time_us() -> usize {
     time::read() / (CLOCK_FREQ / MICRO_PER_SEC)
+}
+
+pub fn get_time_ms() -> usize {
+    time::read() / (CLOCK_FREQ / MSEC_PER_SEC)
 }
 // 设置下一次时钟中断触发，借此建立时间片抢占机制
 pub fn set_next_trigger() {

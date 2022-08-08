@@ -14,7 +14,7 @@ OBJDUMP := rust-objdump --arch-name=riscv64
 OBJCOPY := rust-objcopy --binary-architecture=riscv64
 
 elf: $(APPS)
-	@python3 build.py
+	@cargo build --release
 	
 
 # $(foreach var, list, command)

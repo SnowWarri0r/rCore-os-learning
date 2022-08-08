@@ -33,6 +33,19 @@ fn clear_bss() {
     });
 }
 
+#[repr(C)]
+#[derive(Debug, Default)]
+pub struct TimeVal {
+    pub sec: usize,
+    pub usec: usize,
+}
+
+impl TimeVal {
+    pub fn new() -> Self {
+        Self::default()
+    }
+}
+
 use syscall::*;
 
 pub fn write(fd: usize, buf: &[u8]) -> isize {
@@ -46,7 +59,11 @@ pub fn exit(exit_code: i32) -> isize {
 pub fn yield_() -> isize {
     sys_yield()
 }
-// get current us
+/// get current ms
 pub fn get_time() -> isize {
-    sys_get_time()
+    let time = TimeVal::new();
+    match sys_get_time(&time, 0) {
+        0 => ((time.sec & 0xffff) * 1000 + time.usec / 1000) as isize,
+        _ => -1
+    }
 }
