@@ -7,7 +7,7 @@ mod memory_set;
 use frame_allocator::*;
 pub use memory_set::*;
 pub use address::*;
-pub use page_table::translated_byte_buffer;
+pub use page_table::{translated_byte_buffer, translated_time_val};
 
 pub fn init() {
     heap_allocator::init_heap();

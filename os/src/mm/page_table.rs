@@ -1,9 +1,11 @@
+use crate::syscall::TimeVal;
+
 // Page Table Entry
 // [63,54] reserved
 // [53,10] ppn
 // [10,8] rsw
 // [7,0] flags
-use super::{VirtAddr, StepByOne};
+use super::{PhysAddr, StepByOne, VirtAddr};
 use alloc::vec;
 use alloc::vec::Vec;
 use bitflags::*;
@@ -163,4 +165,13 @@ pub fn translated_byte_buffer(token: usize, ptr: *const u8, len: usize) -> Vec<&
         start = end_va.into();
     }
     v
+}
+
+pub fn translated_time_val(token: usize, ptr: *mut TimeVal) -> *mut TimeVal {
+    let page_table = PageTable::from_token(token);
+    let va = VirtAddr::from(ptr as usize);
+    let vpn = va.floor();
+    let ppn = page_table.translate(vpn).unwrap().ppn();
+    let pa: PhysAddr = ppn.into();
+    (pa.0 + va.page_offset()) as *mut TimeVal
 }

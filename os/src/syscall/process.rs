@@ -1,7 +1,7 @@
 //! App management syscalls
 use crate::{
-    task::{exit_current_and_run_next, suspend_current_and_run_next},
-    timer::get_time_ms,
+    task::{exit_current_and_run_next, suspend_current_and_run_next, current_user_token},
+    timer::get_time_ms, mm::translated_time_val,
 };
 #[repr(C)]
 #[derive(Debug)]
@@ -24,8 +24,9 @@ pub fn sys_yield() -> isize {
 
 pub fn sys_get_time(ts: *mut TimeVal, _tz: usize) -> isize {
     let ms = get_time_ms();
+    let real_ts = translated_time_val(current_user_token(), ts);
     unsafe {
-        *ts = TimeVal {
+        *real_ts = TimeVal {
             sec: ms / 1000,
             usec: (ms - ms / 1000) * 1000,
         };

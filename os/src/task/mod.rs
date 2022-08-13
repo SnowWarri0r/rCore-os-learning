@@ -93,7 +93,6 @@ impl TaskManager {
     }
 
     fn run_next_task(&self) {
-        let cur = get_time_us();
         if let Some(next) = self.find_next_task() {
             let mut inner = self.inner.exclusive_access();
             let current = inner.current_task;
@@ -102,7 +101,6 @@ impl TaskManager {
             let current_task_cx_ptr = &mut inner.tasks[current].task_cx as *mut TaskContext;
             let next_task_cx_ptr = &inner.tasks[next].task_cx as *const TaskContext;
             drop(inner);
-            info!("before switch using: {} us", get_time_us() - cur);
             // before this, we should drop local variables that must be dropped manually
             // 在当前__switch执行完返回后，还没有退出该函数，此时inner还不可借用，而程序如果在此时挂起或退出，那么就会触发下一次借用，从而就会触发panic
             unsafe {
