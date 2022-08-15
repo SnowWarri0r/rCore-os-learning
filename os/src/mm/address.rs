@@ -84,6 +84,10 @@ impl From<VirtPageNum> for usize {
 }
 
 impl PhysAddr {
+    ///Get mutable reference to `PhysAddr` value
+    pub fn get_mut<T>(&self) -> &'static mut T {
+        unsafe { (self.0 as *mut T).as_mut().unwrap() }
+    }
     pub fn page_offset(&self) -> usize {
         self.0 & (PAGE_SIZE - 1)
     }

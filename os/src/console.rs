@@ -92,48 +92,48 @@ macro_rules! print {
   // literal 代表该宏参数匹配一个字面量表达式
   // tt 代表 tokentree，即可以是多个由括号包裹的或者单个关键字等 https://doc.rust-lang.org/reference/tokens.html
     ($fmt: literal $(, $($arg: tt)+)?) => {
-      $crate::console::print(format_args!($fmt $(, $($arg)+)?));
+      $crate::console::print(format_args!($fmt $(, $($arg)+)?))
     };
 }
 
 #[macro_export]
 macro_rules! println {
   ($fmt: literal $(, $($arg: tt)+)?) => {
-    $crate::console::print(format_args!(concat!($fmt, "\n") $(, $($arg)+)?));
+    $crate::console::print(format_args!(concat!($fmt, "\n") $(, $($arg)+)?))
   };
 }
 
 #[macro_export]
 macro_rules! error {
     ($fmt: literal $(, $($arg: tt)+)?) => {
-        $crate::console::print_by_level(format_args!(concat!("\x1b[31m", "[ERROR][0] ", $fmt, "\x1b[0m\n") $(, $($arg)+)?), $crate::console::LogLevel::ERROR);
+        $crate::console::print_by_level(format_args!(concat!("\x1b[31m", "[ERROR][0] ", $fmt, "\x1b[0m\n") $(, $($arg)+)?), $crate::console::LogLevel::ERROR)
     };
 }
 
 #[macro_export]
 macro_rules! warn {
     ($fmt: literal $(, $($arg: tt)+)?) => {
-        $crate::console::print_by_level(format_args!(concat!("\x1b[93m", "[WARN][0] ", $fmt, "\x1b[0m\n") $(, $($arg)+)?), $crate::console::LogLevel::WARN);
+        $crate::console::print_by_level(format_args!(concat!("\x1b[93m", "[WARN][0] ", $fmt, "\x1b[0m\n") $(, $($arg)+)?), $crate::console::LogLevel::WARN)
     };
 }
 
 #[macro_export]
 macro_rules! info {
     ($fmt: literal $(, $($arg: tt)+)?) => {
-        $crate::console::print_by_level(format_args!(concat!("\x1b[34m", "[INFO][0] ", $fmt, "\x1b[0m\n") $(, $($arg)+)?), $crate::console::LogLevel::INFO);
+        $crate::console::print_by_level(format_args!(concat!("\x1b[34m", "[INFO][0] ", $fmt, "\x1b[0m\n") $(, $($arg)+)?), $crate::console::LogLevel::INFO)
     };
 }
 
 #[macro_export]
 macro_rules! debug {
     ($fmt: literal $(, $($arg: tt)+)?) => {
-        $crate::console::print_by_level(format_args!(concat!("\x1b[32m", "[DEBUG][0] ", $fmt, "\x1b[0m\n") $(, $($arg)+)?), $crate::console::LogLevel::DEBUG);
+        $crate::console::print_by_level(format_args!(concat!("\x1b[32m", "[DEBUG][0] ", $fmt, "\x1b[0m\n") $(, $($arg)+)?), $crate::console::LogLevel::DEBUG)
     };
 }
 
 #[macro_export]
 macro_rules! trace {
     ($fmt: literal $(, $($arg: tt)+)?) => {
-        $crate::console::print_by_level(format_args!(concat!("\x1b[90m", "[TRACE][0] ", $fmt, "\x1b[0m\n") $(, $($arg)+)?), $crate::console::LogLevel::TRACE);
+        $crate::console::print_by_level(format_args!(concat!("\x1b[90m", "[TRACE][0] ", $fmt, "\x1b[0m\n") $(, $($arg)+)?), $crate::console::LogLevel::TRACE)
     };
 }

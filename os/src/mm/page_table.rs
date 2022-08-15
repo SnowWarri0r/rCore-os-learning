@@ -1,13 +1,11 @@
-use crate::syscall::TimeVal;
-
 // Page Table Entry
 // [63,54] reserved
 // [53,10] ppn
 // [10,8] rsw
 // [7,0] flags
 use super::{PhysAddr, StepByOne, VirtAddr};
-use alloc::vec;
 use alloc::vec::Vec;
+use alloc::{string::String, vec};
 use bitflags::*;
 
 use super::{
@@ -137,6 +135,16 @@ impl PageTable {
     pub fn translate(&self, vpn: VirtPageNum) -> Option<PageTableEntry> {
         self.find_pte(vpn).map(|pte| pte.clone())
     }
+    pub fn translate_va(&self, va: VirtAddr) -> Option<PhysAddr> {
+        self.find_pte(va.clone().floor()).map(|pte| {
+            //println!("translate_va:va = {:?}", va);
+            let aligned_pa: PhysAddr = pte.ppn().into();
+            //println!("translate_va:pa_align = {:?}", aligned_pa);
+            let offset = va.page_offset();
+            let aligned_pa_usize: usize = aligned_pa.into();
+            (aligned_pa_usize + offset).into()
+        })
+    }
     // satp 寄存器
     // [63,60] MODE 控制 CPU 用哪种页表实现，这里设置为8， SV39分页机制
     // [59,44] ASID 地址空间标识符，没涉及到进程概念，暂时不管
@@ -146,7 +154,7 @@ impl PageTable {
     }
 }
 
-pub fn translated_byte_buffer(token: usize, ptr: *const u8, len: usize) -> Vec<&'static [u8]> {
+pub fn translated_byte_buffer(token: usize, ptr: *const u8, len: usize) -> Vec<&'static mut [u8]> {
     let page_table = PageTable::from_token(token);
     let mut start = ptr as usize;
     let end = start + len;
@@ -161,17 +169,43 @@ pub fn translated_byte_buffer(token: usize, ptr: *const u8, len: usize) -> Vec<&
         // 判断结束虚拟地址是否为一整个物理页帧
         end_va = end_va.min(VirtAddr::from(end));
         // 将真实数据放入数组，这里通过页表项的页内偏移取出数据
-        v.push(&ppn.get_bytes_array()[start_va.page_offset()..end_va.page_offset()]);
+        if end_va.page_offset() == 0 {
+            v.push(&mut ppn.get_bytes_array()[start_va.page_offset()..]);
+        } else {
+            v.push(&mut ppn.get_bytes_array()[start_va.page_offset()..end_va.page_offset()]);
+        }
         start = end_va.into();
     }
     v
 }
 
-pub fn translated_time_val(token: usize, ptr: *mut TimeVal) -> *mut TimeVal {
+pub fn translated_str(token: usize, ptr: *const u8) -> String {
     let page_table = PageTable::from_token(token);
-    let va = VirtAddr::from(ptr as usize);
-    let vpn = va.floor();
-    let ppn = page_table.translate(vpn).unwrap().ppn();
-    let pa: PhysAddr = ppn.into();
-    (pa.0 + va.page_offset()) as *mut TimeVal
+    let mut string = String::new();
+    let mut va = ptr as usize;
+    loop {
+        let ch: u8 = *(page_table
+            .translate_va(VirtAddr::from(va))
+            .unwrap()
+            .get_mut());
+        if ch == 0 {
+            break;
+        } else {
+            string.push(ch as char);
+            va += 1;
+        }
+    }
+    string
+}
+
+///translate a generic through page table and return a mutable reference
+pub fn translated_refmut<T>(token: usize, ptr: *mut T) -> &'static mut T {
+    //println!("into translated_refmut!");
+    let page_table = PageTable::from_token(token);
+    let va = ptr as usize;
+    //println!("translated_refmut: before translate_va");
+    page_table
+        .translate_va(VirtAddr::from(va))
+        .unwrap()
+        .get_mut()
 }
