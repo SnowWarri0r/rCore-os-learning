@@ -13,16 +13,20 @@ BINS := $(patsubst $(APP_DIR)/%.rs, $(TARGET_DIR)/%.bin, $(APPS))
 OBJDUMP := rust-objdump --arch-name=riscv64
 OBJCOPY := rust-objcopy --binary-architecture=riscv64
 
+TEST ?= 
+
 elf: $(APPS)
 	@cargo build --release
-	
+ifeq ($(TEST), 1)
+	@$(CP) $(TARGET_DIR)/usertests $(TARGET_DIR)/initproc
+endif
 
 # $(foreach var, list, command)
 # var 局部变量
 # list 文件列表，空格隔开 每一次取一个值赋值为变量var
 # command  对var变量进行操作 每次操作结果都会以空格隔开，最后返回空格隔开的列表。
 binary: elf
-	$(foreach elf, $(ELFS), $(OBJCOPY) $(elf) --strip-all -O binary $(patsubst $(TARGET_DIR)/%, $(TARGET_DIR)/%.bin, $(elf));)
+	@$(foreach elf, $(ELFS), $(OBJCOPY) $(elf) --strip-all -O binary $(patsubst $(TARGET_DIR)/%, $(TARGET_DIR)/%.bin, $(elf));)
 
 build: clean binary
 

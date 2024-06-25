@@ -5,7 +5,7 @@ use lazy_static::lazy_static;
 use riscv::register::satp;
 
 use crate::{
-    config::{MEMORY_END, PAGE_SIZE, TRAMPOLINE, TRAP_CONTEXT, USER_STACK_SIZE, MMIO},
+    config::{MEMORY_END, MMIO, PAGE_SIZE, TRAMPOLINE, TRAP_CONTEXT, USER_STACK_SIZE},
     mm::address::StepByOne,
     sync::UPSafeCell,
 };
@@ -357,7 +357,9 @@ impl MemorySet {
             for vpn in area.vpn_range {
                 let src_ppn = user_space.translate(vpn).unwrap().ppn();
                 let dst_ppn = memory_set.translate(vpn).unwrap().ppn();
-                dst_ppn.get_bytes_array().copy_from_slice(src_ppn.get_bytes_array());
+                dst_ppn
+                    .get_bytes_array()
+                    .copy_from_slice(src_ppn.get_bytes_array());
             }
         }
         memory_set
@@ -391,6 +393,10 @@ impl MemorySet {
 lazy_static! {
     pub static ref KERNEL_SPACE: Arc<UPSafeCell<MemorySet>> =
         Arc::new(unsafe { UPSafeCell::new(MemorySet::new_kernel()) });
+}
+
+pub fn kernel_token() -> usize {
+    KERNEL_SPACE.exclusive_access().token()
 }
 
 pub fn remap_test() {

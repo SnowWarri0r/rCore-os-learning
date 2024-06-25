@@ -1,53 +1,69 @@
 //! File and filesystem-related syscalls
+use crate::{
+    fs::{open_file, OpenFlags},
+    mm::{translated_byte_buffer, translated_str, UserBuffer},
+    task::{
+        current_task, current_user_token,
+    },
+};
 
-use crate::{mm::translated_byte_buffer, task::{exit_current_and_run_next, current_user_token, suspend_current_and_run_next}, sbi::console_getchar};
-const FD_STDIN: usize = 0;
-const FD_STDOUT: usize = 1;
-
-/// write buf of length `len`  to a file with `fd`
 pub fn sys_write(fd: usize, buf: *const u8, len: usize) -> isize {
-    match fd {
-        FD_STDOUT => {
-            let buffers = translated_byte_buffer(current_user_token(), buf, len);
-            for buffer in buffers {
-                print!("{}", core::str::from_utf8(buffer).unwrap());
-            }
-            len as isize
-        }
-        _ => {
-            println!("[kernel] Unsupported fd in sys_write!");
-            exit_current_and_run_next(-1);
-            -1
-        }
+    let token = current_user_token();
+    let task = current_task().unwrap();
+    let inner = task.inner_exclusive_access();
+    if fd >= inner.fd_table.len() {
+        return -1;
+    }
+    if let Some(file) = &inner.fd_table[fd] {
+        let file = file.clone();
+        // 手动释放当前任务的TCB，避免多重借用
+        drop(inner);
+        file.write(UserBuffer::new(translated_byte_buffer(token, buf, len))) as isize
+    } else {
+        -1
     }
 }
-/// 功能：从文件中读取一段内容到缓冲区。
-/// 参数：fd 是待读取文件的文件描述符，切片 buffer 则给出缓冲区。
-/// 返回值：如果出现了错误则返回 -1，否则返回实际读到的字节数。
-/// syscall ID：63
+
 pub fn sys_read(fd: usize, buf: *const u8, len: usize) -> isize {
-    match fd {
-        FD_STDIN => {
-            assert_eq!(len, 1, "Only support len = 1 in sys_read!");
-            let mut c: usize;
-            loop {
-                c = console_getchar();
-                if c == 0 {
-                    suspend_current_and_run_next();
-                    continue;
-                } else {
-                    break;
-                }
-            }
-            let ch = c as u8;
-            let mut buffers = translated_byte_buffer(current_user_token(), buf, len);
-            unsafe { buffers[0].as_mut_ptr().write_volatile(ch); }
-            1
-        }
-        _ => {
-            println!("[kernel] Unsupported fd in sys_read!");
-            exit_current_and_run_next(-1);
-            -1
-        }
+    let token = current_user_token();
+    let task = current_task().unwrap();
+    let inner = task.inner_exclusive_access();
+    if fd >= inner.fd_table.len() {
+        return -1;
     }
+    if let Some(file) = &inner.fd_table[fd] {
+        let file = file.clone();
+        // 手动释放当前任务的TCB，避免多重借用
+        drop(inner);
+        file.read(UserBuffer::new(translated_byte_buffer(token, buf, len))) as isize
+    } else {
+        -1
+    }
+}
+
+pub fn sys_open(path: *const u8, flags: u32) -> isize {
+    let task = current_task().unwrap();
+    let token = current_user_token();
+    let path = translated_str(token, path);
+    if let Some(inode) = open_file(path.as_str(), OpenFlags::from_bits(flags).unwrap()) {
+        let mut inner = task.inner_exclusive_access();
+        let fd = inner.alloc_fd();
+        inner.fd_table[fd] = Some(inode);
+        fd as isize
+    } else {
+        -1
+    }
+}
+
+pub fn sys_close(fd: usize) -> isize {
+    let task = current_task().unwrap();
+    let mut inner = task.inner_exclusive_access();
+    if fd >= inner.fd_table.len() {
+        return -1;
+    }
+    if inner.fd_table[fd].is_none() {
+        return -1;
+    }
+    inner.fd_table[fd].take();
+    0
 }

@@ -1,3 +1,4 @@
+#![allow(unused_imports)]
 #![no_std]
 #![no_main]
 #![feature(panic_info_message)]
@@ -12,20 +13,20 @@ extern crate bitflags;
 #[macro_use]
 mod console;
 mod config;
-mod lang_items;
-mod loader;
-mod mm;
-mod sbi;
-mod sync;
-mod syscall;
-mod task;
-mod timer;
-mod trap;
+mod drivers;
+pub mod fs;
+pub mod lang_items;
+pub mod mm;
+pub mod sbi;
+pub mod sync;
+pub mod syscall;
+pub mod task;
+pub mod timer;
+pub mod trap;
 
 use core::arch::global_asm;
 
 global_asm!(include_str!("entry.asm"));
-global_asm!(include_str!("link_app.S"));
 // 防止编译器对函数符号混淆
 #[no_mangle]
 pub fn rust_main() -> ! {
@@ -34,11 +35,11 @@ pub fn rust_main() -> ! {
     mm::init();
     println!("[kernel] back to world!");
     mm::remap_test();
-    task::add_initproc();
     trap::init();
     trap::enable_timer_interrupt();
     timer::set_next_trigger();
-    loader::list_apps();
+    fs::list_apps();
+    task::add_initproc();
     task::run_tasks();
     panic!("Unreachable in rust_main!");
 }
