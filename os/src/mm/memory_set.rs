@@ -2,6 +2,7 @@ use core::{arch::asm, usize};
 
 use alloc::{collections::BTreeMap, sync::Arc, vec::Vec};
 use lazy_static::lazy_static;
+use log::info;
 use riscv::register::satp;
 
 use crate::{

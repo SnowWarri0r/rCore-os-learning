@@ -1,3 +1,5 @@
+extern crate log;
+
 use clap::{App, Arg};
 use easy_fs::{BlockDevice, EasyFileSystem};
 use std::{
@@ -5,6 +7,7 @@ use std::{
     io::{Read, Seek, SeekFrom, Write},
     sync::{Arc, Mutex},
 };
+use log::{Log, Level, LevelFilter};
 
 const BLOCK_SZ: usize = 512;
 
@@ -26,6 +29,7 @@ impl BlockDevice for BlockFile {
 }
 
 fn main() {
+    init();
     easy_fs_pack().expect("Error when packing easy-fs!");
 }
 
@@ -59,9 +63,9 @@ fn easy_fs_pack() -> std::io::Result<()> {
         f
     })));
     // 16MiB，最多 4095 个文件，剩下一个 inode 块，作为根目录块，保存目录项
-    let efs = EasyFileSystem::create(block_file.clone(), 16 * 2048, 1);
+    let efs = EasyFileSystem::create(block_file, 16 * 2048, 1);
     let root_inode = EasyFileSystem::root_inode(&efs);
-    let apps: Vec<_> = read_dir(src_path)
+    let apps: Vec<String> = read_dir(src_path)
         .unwrap()
         .into_iter()
         .map(|dir_entry| {
@@ -79,7 +83,8 @@ fn easy_fs_pack() -> std::io::Result<()> {
         // 在 easy-fs 创建文件
         let inode = root_inode.create(app.as_str()).unwrap();
         // 写入文件数据
-        inode.write_at(0, all_data.as_slice());
+        let len = inode.write_at(0, all_data.as_slice());
+        assert_eq!(len, all_data.len());
     }
     // list apps
     // for app in root_inode.ls() {
@@ -99,14 +104,16 @@ fn efs_test() -> std::io::Result<()> {
         f.set_len(8192 * 512).unwrap();
         f
     })));
+    // 1 inode bitmap has 4096 inodes, a inode 128 bytes, a block 512 bytes
+    // so total 1024 inode blocks, 1 super block, 1 inode bitmap block, 1 data bitmap block, 4096 - 1027 = 3069 blocks
     EasyFileSystem::create(block_file.clone(), 4096, 1);
     let efs = EasyFileSystem::open(block_file.clone());
     let root_inode = EasyFileSystem::root_inode(&efs);
     root_inode.create("filea");
     root_inode.create("fileb");
-    for name in root_inode.ls() {
-        println!("{}", name);
-    }
+    // for name in root_inode.ls() {
+    //     println!("{}", name);
+    // }
     let filea = root_inode.find("filea").unwrap();
     let greet_str = "Hello, world!";
     filea.write_at(0, greet_str.as_bytes());
@@ -146,6 +153,43 @@ fn efs_test() -> std::io::Result<()> {
     random_str_test(400 * BLOCK_SZ);
     random_str_test(1000 * BLOCK_SZ);
     random_str_test(2000 * BLOCK_SZ);
+    random_str_test(3069 * BLOCK_SZ);
 
     Ok(())
+}
+
+pub struct Logger;
+
+pub fn init() {
+    Logger::new().init();
+}
+
+impl Logger {
+    fn new() -> &'static Self {
+        &Self
+    }
+    fn init(&'static self) {
+        log::set_max_level(LevelFilter::Trace);
+        log::set_logger(self).unwrap();
+    }
+}
+
+impl Log for Logger {
+    fn enabled(&self, metadata: &log::Metadata) -> bool {
+        &metadata.level().to_level_filter() <= &LevelFilter::Trace
+    }
+    fn log(&self, record: &log::Record) {
+        if self.enabled(record.metadata()) {
+            let level_string = match record.level() {
+                Level::Error => format!("\x1b[31m[{}]", record.level().as_str()),
+                Level::Warn => format!("\x1b[93m[{}]", record.level().as_str()),
+                Level::Info => format!("\x1b[34m[{}]", record.level().as_str()),
+                Level::Debug => format!("\x1b[32m[{}]", record.level().as_str()),
+                Level::Trace => format!("\x1b[90m[{}]", record.level().as_str()),
+            };
+            let message = format!("{}[0] {}\x1b[0m", level_string, record.args());
+            println!("{}", message);
+        }
+    }
+    fn flush(&self) {}
 }

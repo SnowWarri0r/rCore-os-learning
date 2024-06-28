@@ -1,8 +1,9 @@
 use alloc::{sync::Arc, vec, vec::Vec};
 use lazy_static::lazy_static;
 
-use crate::{BlockDevice, BLOCK_SZ};
+use super::{BlockDevice, BLOCK_SZ};
 use spin::Mutex;
+
 const BLOCK_CACHE_SIZE: usize = 16;
 
 lazy_static! {
@@ -17,6 +18,14 @@ pub fn get_block_cache(
     BLOCK_CACHE_MANAGER
         .lock()
         .get_block_cache(block_id, block_device)
+}
+
+/// Sync all block cache to block device
+pub fn block_cache_sync_all() {
+    let manager = BLOCK_CACHE_MANAGER.lock();
+    for (_, cache) in manager.queue.iter() {
+        cache.lock().sync();
+    }
 }
 
 pub struct BlockCacheManager {
@@ -64,7 +73,7 @@ impl BlockCacheManager {
 }
 
 pub struct BlockCache {
-    // cache: [u8; BLOCK_SZ]
+    // cache: [u8; BLOCK_SZ],
     cache: Vec<u8>,
     block_id: usize,
     block_device: Arc<dyn BlockDevice>,
@@ -73,7 +82,7 @@ pub struct BlockCache {
 
 impl Drop for BlockCache {
     fn drop(&mut self) {
-        self.sync()
+        self.sync();
     }
 }
 
@@ -83,7 +92,8 @@ impl BlockCache {
         // 所以这里从 block device 中读取的数据写入到的 buf 在虚拟页对物理页的映射上也是连续的
         // 但是如果 buf 不是通过 buddy system 分配的，那么虚拟页和物理页的映射就可能不连续了
         // 所以如果将 buf 写回 block device，因为通过 DMA 进行数据传输需要保证物理页连续，所以会产生脏数据
-        // 可能产生脏页的实现：let mut cache = [0u8; BLOCK_SZ];
+        // 可能产生脏页的实现：
+        // let mut cache = [0u8; BLOCK_SZ];
         let mut cache = vec![0u8; BLOCK_SZ];
         block_device.read_block(block_id, &mut cache);
         Self {

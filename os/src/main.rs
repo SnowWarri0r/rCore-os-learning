@@ -6,6 +6,7 @@
 
 extern crate alloc;
 extern crate xmas_elf;
+extern crate log;
 
 #[macro_use]
 extern crate bitflags;
@@ -31,6 +32,7 @@ global_asm!(include_str!("entry.asm"));
 #[no_mangle]
 pub fn rust_main() -> ! {
     clear_bss();
+    console::init();
     println!("[kernel] Hello, world!");
     mm::init();
     println!("[kernel] back to world!");

@@ -1,6 +1,6 @@
 use alloc::sync::Arc;
 
-use crate::{block_cache::get_block_cache, BlockDevice, BLOCK_SZ};
+use super::{get_block_cache, BlockDevice, BLOCK_SZ};
 
 const BLOCK_BITS: usize = BLOCK_SZ * 8;
 
@@ -13,7 +13,7 @@ pub struct Bitmap {
 /// Return (block_pos, bits64_pos, inner_pos)
 fn decomposition(mut bit: usize) -> (usize, usize, usize) {
     let block_pos = bit / BLOCK_BITS;
-    bit = bit % BLOCK_BITS;
+    bit %= BLOCK_BITS;
     (block_pos, bit / 64, bit % 64)
 }
 
@@ -24,7 +24,7 @@ impl Bitmap {
             blocks,
         }
     }
-    // 从block device中分配一个block，返回在该bitmap中的block id
+    // 从 block device 中分配一个 block，返回在该 bitmap 中的 block id
     pub fn alloc(&self, block_device: &Arc<dyn BlockDevice>) -> Option<usize> {
         for block_id in 0..self.blocks {
             let pos = get_block_cache(
@@ -62,7 +62,7 @@ impl Bitmap {
         .lock()
         .modify(0, |bitmap_block: &mut BitmapBlock| {
             assert!(bitmap_block[bits64_pos] & (1u64 << inner_pos) > 0);
-            bitmap_block[bits64_pos] &= !(1u64 << inner_pos);
+            bitmap_block[bits64_pos] ^= 1u64 << inner_pos;
         });
     }
     pub fn maximum(&self) -> usize {

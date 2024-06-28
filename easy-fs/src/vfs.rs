@@ -1,9 +1,10 @@
-use alloc::{string::String, sync::Arc, vec::Vec};
+use alloc::{fmt::Debug, format, string::String, sync::Arc, vec::Vec};
 use spin::{Mutex, MutexGuard};
 
-use crate::{
-    block_cache::get_block_cache,
-    layout::{DirEntry, DiskInode, DiskInodeType, DIRENT_SZ},
+
+use super::{
+    get_block_cache, block_cache_sync_all,
+    DirEntry, DiskInode, DiskInodeType, DIRENT_SZ,
     BlockDevice, EasyFileSystem,
 };
 
@@ -13,6 +14,15 @@ pub struct Inode {
     block_offset: usize,
     fs: Arc<Mutex<EasyFileSystem>>,
     block_device: Arc<dyn BlockDevice>,
+}
+
+impl Debug for Inode {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.debug_struct("Inode")
+            .field("block_id", &self.block_id)
+            .field("block_offset", &self.block_offset)
+            .finish()
+    }
 }
 
 impl Inode {
@@ -37,7 +47,7 @@ impl Inode {
             self.find_inode_id(name, disk_inode).map(|inode_id| {
                 let (block_id, block_offset) = fs.get_disk_inode_pos(inode_id);
                 Arc::new(Self::new(
-                    block_id as u32,
+                    block_id,
                     block_offset,
                     self.fs.clone(),
                     self.block_device.clone(),
@@ -58,7 +68,11 @@ impl Inode {
                     disk_inode.read_at(DIRENT_SZ * i, dirent.as_bytes_mut(), &self.block_device),
                     DIRENT_SZ
                 );
-                v.push(String::from(dirent.name()));
+                v.push(String::from(format!(
+                    "{} {}",
+                    dirent.name(),
+                    dirent.inode_number()
+                )));
             }
             v
         })
@@ -103,6 +117,7 @@ impl Inode {
         });
 
         let (block_id, block_offset) = fs.get_disk_inode_pos(new_inode_id);
+        block_cache_sync_all();
         // 返回新创建的inode
         Some(Arc::new(Self::new(
             block_id,
@@ -123,6 +138,7 @@ impl Inode {
                 fs.dealloc_data(data_block);
             }
         });
+        block_cache_sync_all();
     }
     /// 读取文件内容到buf中
     pub fn read_at(&self, offset: usize, buf: &mut [u8]) -> usize {
@@ -132,10 +148,13 @@ impl Inode {
     /// 从buf读取内容写入文件
     pub fn write_at(&self, offset: usize, buf: &[u8]) -> usize {
         let mut fs = self.fs.lock();
-        self.modify_disk_inode(|disk_inode| {
+
+        let size = self.modify_disk_inode(|disk_inode| {
             self.increase_size((offset + buf.len()) as u32, disk_inode, &mut fs);
             disk_inode.write_at(offset, buf, &self.block_device)
-        })
+        });
+        block_cache_sync_all();
+        size
     }
     /// 增加disk inode大小，分配相应的inode block和data block
     fn increase_size(
@@ -154,7 +173,7 @@ impl Inode {
         }
         disk_inode.increase_size(new_size, v, &self.block_device);
     }
-    /// 通过文件名查找文件Inode节点的inode_id
+    /// 通过文件名查找文件 Inode 节点的 inode_id
     fn find_inode_id(&self, name: &str, disk_inode: &DiskInode) -> Option<u32> {
         // assert it is a directory
         assert!(disk_inode.is_dir());

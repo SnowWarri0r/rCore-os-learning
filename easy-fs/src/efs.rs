@@ -1,10 +1,10 @@
-use alloc::sync::Arc;
+use alloc::{format, string::String, sync::Arc};
 use spin::Mutex;
 
-use crate::{
-    bitmap::Bitmap,
-    block_cache::get_block_cache,
-    layout::{DiskInode, DiskInodeType, SuperBlock},
+use super::{
+    Bitmap,
+    get_block_cache, block_cache_sync_all,
+    DiskInode, DiskInodeType, SuperBlock,
     BlockDevice, Inode, BLOCK_SZ,
 };
 
@@ -36,8 +36,9 @@ impl EasyFileSystem {
         let inode_area_blocks =
             ((inode_num * core::mem::size_of::<DiskInode>() + BLOCK_SZ - 1) / BLOCK_SZ) as u32;
         let inode_total_blocks = inode_bitmap_blocks + inode_area_blocks;
+        // 一个超级块 + inode 总共块数
         let data_total_blocks = total_blocks - 1 - inode_total_blocks;
-        // 一个 bitmap 可以管 4096 个 inode，所以分配的 data_bitmap 块数为 (data_total_blocks + 4096) / 4097
+        // 一个 bitmap 可以管 4096 个 block，所以分配的 data_bitmap 块数为 (data_total_blocks + 4096) / 4097
         let data_bitmap_blocks = (data_total_blocks + 4096) / 4097;
         let data_area_blocks = data_total_blocks - data_bitmap_blocks;
         let data_bitmap = Bitmap::new(
@@ -82,6 +83,7 @@ impl EasyFileSystem {
             .modify(root_inode_offset, |disk_inode: &mut DiskInode| {
                 disk_inode.initialize(DiskInodeType::Directory);
             });
+        block_cache_sync_all();
         Arc::new(Mutex::new(efs))
     }
     /// 从 block device 加载 EFS
@@ -124,7 +126,8 @@ impl EasyFileSystem {
     pub fn alloc_inode(&mut self) -> u32 {
         self.inode_bitmap.alloc(&self.block_device).unwrap() as u32
     }
-    /// 分配数据块，返回分配到的 block id，这里的 id 是磁盘上实际 block id
+
+    /// 分配数据块，返回分配到的 block id，这里的 id 是 data 区域内的 block id
     pub fn alloc_data(&mut self) -> u32 {
         self.data_bitmap.alloc(&self.block_device).unwrap() as u32 + self.data_area_start_block
     }
@@ -149,5 +152,15 @@ impl EasyFileSystem {
         let (block_id, block_offset) = efs.lock().get_disk_inode_pos(0);
         // 释放 efs 锁
         Inode::new(block_id, block_offset, Arc::clone(efs), block_device)
+    }
+    /// 获取超级块信息
+    pub fn get_super_block(block_device: Arc<dyn BlockDevice>) -> String {
+        // 读取超级块
+        get_block_cache(0, Arc::clone(&block_device))
+            .lock()
+            .read(0, |super_block: &SuperBlock| {
+                assert!(super_block.is_valid(), "Error loading EFS!");
+                format!("{:?}", super_block)
+            })
     }
 }

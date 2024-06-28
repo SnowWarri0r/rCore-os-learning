@@ -7,11 +7,17 @@ use crate::{drivers::BLOCK_DEVICE, mm::UserBuffer, sync::UPSafeCell};
 use super::File;
 
 bitflags! {
+    /// Open file flags
     pub struct OpenFlags: u32 {
+        /// Read only
         const RDONLY = 0;
+        /// Write only
         const WRONLY = 1 << 0;
+        /// Read and write
         const RDWR = 1 << 1;
+        /// Allow create
         const CREATE = 1 << 9;
+        /// Clear file and return empty one
         const TRUNC = 1 << 10;
     }
 }
@@ -111,7 +117,7 @@ pub fn list_apps() {
     for app in ROOT_INODE.ls() {
         println!("{}", app);
     }
-    println!("**************/")
+    println!("**************/");
 }
 
 pub fn open_file(name: &str, flags: OpenFlags) -> Option<Arc<OSInode>> {
