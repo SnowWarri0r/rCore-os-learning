@@ -78,7 +78,7 @@ pub fn run_tasks() {
         }
     }
 }
-
+// 保存当前进程上下文，提取下一个要运行的进程的上下文到寄存器，并恢复堆栈指针。
 pub fn schedule(switched_task_cx_ptr: *mut TaskContext) {
     let mut processor = PROCESSOR.exclusive_access();
     let idle_task_cx_ptr = processor.get_idle_task_cx_ptr();

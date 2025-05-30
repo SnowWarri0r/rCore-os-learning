@@ -9,6 +9,7 @@ const VA_WIDTH_SV39: usize = 39;
 const PPN_WIDTH_SV39: usize = PA_WIDTH_SV39 - PAGE_SIZE_BITS;
 const VPN_WIDTH_SV39: usize = VA_WIDTH_SV39 - PAGE_SIZE_BITS;
 
+/// 物理地址，真正的内存物理地址，所以从这里解出来的satp可以让cpu直接查询到
 #[derive(Copy, Clone, Ord, PartialOrd, Eq, PartialEq)]
 pub struct PhysAddr(pub usize);
 
@@ -84,6 +85,9 @@ impl From<VirtPageNum> for usize {
 }
 
 impl PhysAddr {
+    pub fn get_ref<T>(&self) -> &'static T {
+        unsafe { (self.0 as *const T).as_ref().unwrap() }
+    }
     ///Get mutable reference to `PhysAddr` value
     pub fn get_mut<T>(&self) -> &'static mut T {
         unsafe { (self.0 as *mut T).as_mut().unwrap() }
@@ -142,6 +146,8 @@ impl VirtPageNum {
         let mut vpn = self.0;
         let mut idx = [0usize; 3];
         for i in (0..3).rev() {
+            // 511 = 111111111
+            // 相当于取出虚拟页号的三级索引部分，即三个9位二进制数，前27位
             idx[i] = vpn & 511;
             vpn >>= 9;
         }

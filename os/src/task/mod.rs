@@ -1,26 +1,31 @@
 //! Task management implementation
+mod action;
 mod context;
 mod manager;
 mod pid;
 mod processor;
+mod signal;
 mod switch;
 
 #[allow(clippy::module_inception)]
 mod task;
 
+use action::SignalActions;
 use alloc::sync::Arc;
 use context::TaskContext;
 use lazy_static::lazy_static;
-pub use processor::*;
+use manager::remove_from_pid2task;
 
-use crate::{
-    fs::{open_file, OpenFlags},
-};
+pub use action::SignalAction;
+pub use manager::pid2task;
+pub use processor::*;
+pub use signal::*;
 pub use manager::add_task;
 
-use self::{
-    task::*,
-};
+use crate::fs::{open_file, OpenFlags};
+
+
+use self::task::*;
 
 lazy_static! {
     pub static ref INITPROC: Arc<TaskControlBlock> = Arc::new({
@@ -29,10 +34,22 @@ lazy_static! {
         TaskControlBlock::new(v.as_slice())
     });
 }
+
 pub fn add_initproc() {
     add_task(INITPROC.clone());
 }
 
+pub fn check_signals_error_of_current() -> Option<(i32, &'static str)> {
+    let task = current_task().unwrap();
+    let task_inner = task.inner_exclusive_access();
+    // println!(
+    //     "[K] check_signals_error_of_current {:?}",
+    //     task_inner.signals
+    // );
+    task_inner.signals.check_error()
+}
+
+// 主动让出当前任务控制权，并切换到下一个任务
 pub fn suspend_current_and_run_next() {
     // There must be an application running.
     let task = take_current_task().unwrap();
@@ -54,6 +71,8 @@ pub fn suspend_current_and_run_next() {
 pub fn exit_current_and_run_next(exit_code: i32) {
     // take from Processor
     let task = take_current_task().unwrap();
+    // remove from pid2task
+    remove_from_pid2task(task.getpid());
     // **** access current TCB exclusively
     let mut inner = task.inner_exclusive_access();
     // Change status to Zombie
@@ -80,6 +99,121 @@ pub fn exit_current_and_run_next(exit_code: i32) {
     // drop task manually to maintain rc correctly
     drop(task);
     // we do not have to save task context
+    // 保存到的是一个临时的TaskContext，执行完就被释放了
     let mut _unused = TaskContext::zero_init();
     schedule(&mut _unused as *mut _);
+}
+
+pub fn current_add_signal(signal: SignalFlags) {
+    let task = current_task().unwrap();
+    let mut task_inner = task.inner_exclusive_access();
+    task_inner.signals |= signal;
+}
+
+fn call_kernel_signal_handler(signal: SignalFlags) {
+    let task = current_task().unwrap();
+    let mut task_inner = task.inner_exclusive_access();
+    match signal {
+        SignalFlags::SIGSTOP => {
+            task_inner.frozen = true;
+            task_inner.signals ^= SignalFlags::SIGSTOP;
+        }
+        SignalFlags::SIGCONT => {
+            if task_inner.signals.contains(SignalFlags::SIGCONT) {
+                task_inner.signals ^= SignalFlags::SIGCONT;
+                task_inner.frozen = false;
+            }
+        }
+        _ => {
+            // println!(
+            //     "[K] call_kernel_signal_handler:: current task sigflag {:?}",
+            //     task_inner.signals
+            // );
+            task_inner.killed = true;
+        }
+    }
+}
+
+fn call_user_signal_handler(sig: usize, signal: SignalFlags) {
+    let task = current_task().unwrap();
+    let mut task_inner = task.inner_exclusive_access();
+
+    let handler = task_inner.signal_actions.table[sig].handler;
+    if handler != 0 {
+        // user handler
+
+        // handle flag
+        task_inner.handling_sig = sig as isize;
+        task_inner.signals ^= signal;
+
+        // backup trapframe
+        let trap_ctx = task_inner.get_trap_cx();
+        task_inner.trap_ctx_backup = Some(*trap_ctx);
+
+        // modify trapframe
+        trap_ctx.sepc = handler;
+
+        // put args (a0)
+        trap_ctx.x[10] = sig;
+    } else {
+        // default action
+        println!("[K] task/call_user_signal_handler: default action: ignore it or kill process");
+    }
+}
+
+fn check_pending_signals() {
+    for sig in 0..(MAX_SIG + 1) {
+        let task = current_task().unwrap();
+        let task_inner = task.inner_exclusive_access();
+        let signal = SignalFlags::from_bits(1 << sig).unwrap();
+        // 检查信号是否被进程全局信号mask屏蔽
+        if task_inner.signals.contains(signal) && (!task_inner.signal_mask.contains(signal)) {
+            let mut masked = true;
+            let handling_sig = task_inner.handling_sig;
+            // 检查当前是否有正在执行的信号handler
+            if handling_sig == -1 {
+                masked = false;
+            } else {
+                // 检查是否被当前执行的信号handler屏蔽
+                let handling_sig = handling_sig as usize;
+                if !task_inner.signal_actions.table[handling_sig]
+                    .mask
+                    .contains(signal)
+                {
+                    masked = false;
+                }
+            }
+            if !masked {
+                drop(task_inner);
+                drop(task);
+                if signal == SignalFlags::SIGKILL
+                    || signal == SignalFlags::SIGSTOP
+                    || signal == SignalFlags::SIGCONT
+                    || signal == SignalFlags::SIGDEF
+                {
+                    // signal is a kernel signal
+                    call_kernel_signal_handler(signal);
+                } else {
+                    // signal is a user signal
+                    call_user_signal_handler(sig, signal);
+                    return;
+                }
+            }
+        }
+    }
+}
+
+pub fn handle_signals() {
+    loop {
+        check_pending_signals();
+        let (frozen, killed) = {
+            let task = current_task().unwrap();
+            let task_inner = task.inner_exclusive_access();
+            (task_inner.frozen, task_inner.killed)
+        };
+        if !frozen || killed {
+            break;
+        }
+        suspend_current_and_run_next();
+    }
 }

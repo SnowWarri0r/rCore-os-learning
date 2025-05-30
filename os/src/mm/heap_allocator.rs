@@ -6,6 +6,7 @@ static HEAP_ALLOCATOR: LockedHeap = LockedHeap::empty();
 
 static mut HEAP_SPACE: [u8; KERNEL_HEAP_SIZE] = [0; KERNEL_HEAP_SIZE];
 
+#[allow(static_mut_refs)]
 pub fn init_heap() {
     unsafe {
         HEAP_ALLOCATOR

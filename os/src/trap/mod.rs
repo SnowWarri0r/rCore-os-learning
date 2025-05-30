@@ -5,7 +5,7 @@ use crate::{
     syscall::*,
     task::{
         current_trap_cx, current_user_token, exit_current_and_run_next,
-        suspend_current_and_run_next,
+        suspend_current_and_run_next, SignalFlags, handle_signals, check_signals_error_of_current, current_add_signal,
     },
     timer::set_next_trigger,
 };
@@ -48,12 +48,16 @@ pub fn trap_return() -> ! {
         fn __alltraps();
         fn __restore();
     }
+    // 因为__alltraps和__restore都在跳板页面，并且__alltraps和跳板页起始位置对齐，所以可以通过偏移量得到__restore的虚拟地址
     let restore_va = __restore as usize - __alltraps as usize + TRAMPOLINE;
     unsafe {
         asm!(
+            // 清理指令缓存，因为进行了页表映射，可能拿到错误指令
             "fence.i",
+            // 跳转到__restore
             "jr {restore_va}",
             restore_va = in(reg) restore_va,
+            // __restore函数的两个输入，trap_cx_ptr和user_satp
             in("a0") trap_cx_ptr,
             in("a1") user_satp,
             options(noreturn)
@@ -87,19 +91,21 @@ pub fn trap_handler() -> ! {
         Trap::Exception(Exception::InstructionPageFault) |
         Trap::Exception(Exception::LoadFault) |
         Trap::Exception(Exception::LoadPageFault) => {
-            println!(
-                "[kernel] {:?} in application, bad addr = {:#x}, bad instruction = {:#x}, core dumped.",
-                scause.cause(),
-                stval,
-                current_trap_cx().sepc,
-            );
-            // page fault exit code
-            exit_current_and_run_next(-2);
+            // println!(
+            //     "[kernel] {:?} in application, bad addr = {:#x}, bad instruction = {:#x}, core dumped.",
+            //     scause.cause(),
+            //     stval,
+            //     current_trap_cx().sepc,
+            // );
+            // // page fault exit code
+            // exit_current_and_run_next(-2);
+            current_add_signal(SignalFlags::SIGSEGV);
         }
         Trap::Exception(Exception::IllegalInstruction) => {
-            println!("[kernel] IllegalInstruction in application, core dumped.");
-            // illegal instruction exit code
-            exit_current_and_run_next(-3);
+            // println!("[kernel] IllegalInstruction in application, core dumped.");
+            // // illegal instruction exit code
+            // exit_current_and_run_next(-3);
+            current_add_signal(SignalFlags::SIGILL);
         }
         _ => {
             panic!(
@@ -108,6 +114,14 @@ pub fn trap_handler() -> ! {
                 stval
             )
         }
+    }
+    // handle signals (handle the sent signal)
+    //println!("[K] trap_handler:: handle_signals");
+    handle_signals();
+    // check error signals (if error then exit)
+    if let Some((errno, msg)) = check_signals_error_of_current() {
+        println!("[kernel] {}", msg);
+        exit_current_and_run_next(errno);
     }
     trap_return();
 }

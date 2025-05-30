@@ -1,9 +1,11 @@
 mod inode;
 mod stdio;
+mod pipe;
 
 use crate::mm::UserBuffer;
 pub use inode::{open_file, OpenFlags, list_apps};
 pub use stdio::{Stdin, Stdout};
+pub use pipe::make_pipe;
 
 /// os 层面抽象的 file 概念
 pub trait File : Send + Sync {

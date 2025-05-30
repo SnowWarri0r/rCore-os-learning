@@ -276,7 +276,11 @@ impl MemorySet {
     /// also returns user_sp and entry point.
     pub fn from_elf(elf_data: &[u8]) -> (Self, usize, usize) {
         let mut memory_set = Self::new_bare();
-        // map trampoline
+        // map trampoline 跳板页，上面有 __alltraps 函数和 __restore 函数
+        // 因为这个页面运行的代码会在用户态和内核态之间来回切换，所以叫做跳板页
+        // 而且这个跳板页面在内核态和用户态的页表中都是被映射在同一个虚拟地址上
+        // 从而保证了在进入内核态的时候，跳板页面的地址和在用户态的时候是一样的
+        // 也就保证了指令执行的顺序不会有问题
         memory_set.map_trampoline();
         // map program headers of elf, with U flag
         let elf = xmas_elf::ElfFile::new(elf_data).unwrap();
