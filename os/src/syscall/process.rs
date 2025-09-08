@@ -6,7 +6,7 @@ use crate::{
     mm::{translated_ref, translated_refmut, translated_str},
     task::{
         add_task, current_task, current_user_token, exit_current_and_run_next,
-        suspend_current_and_run_next, SignalAction, SignalFlags, MAX_SIG, pid2task,
+        suspend_current_and_run_next, SignalFlags, MAX_SIG, current_process, pid2process,
     },
     timer::get_time_ms,
 };
@@ -38,23 +38,23 @@ pub fn sys_get_time(ts: *mut TimeVal, _tz: usize) -> isize {
     0
 }
 pub fn sys_getpid() -> isize {
-    current_task().unwrap().pid.0 as isize
+    current_task().unwrap().process.upgrade().unwrap().getpid() as isize
 }
 
 /// 功能：当前进程 fork 出来一个子进程。
 /// 返回值：对于子进程返回 0，对于当前进程则返回子进程的 PID 。
 /// syscall ID：220
 pub fn sys_fork() -> isize {
-    let current_task = current_task().unwrap();
-    let new_task = current_task.fork();
-    let new_pid = new_task.pid.0;
+    let current_process = current_process();
+    let new_process = current_process.fork();
+    let new_pid = new_process.getpid();
     // modify trap context of new_task, because it returns immediately after switching
-    let trap_cx = new_task.inner_exclusive_access().get_trap_cx();
+    let new_process_inner = new_process.inner_exclusive_access();
+    let task = new_process_inner.tasks[0].as_ref().unwrap();
+    let trap_cx = task.inner_exclusive_access().get_trap_cx();
     // we do not have to move to next instruction since we have done it before
     // for child process, fork returns 0
     trap_cx.x[10] = 0; //x[10] is a0 reg
-                       // add new task to scheduler
-    add_task(new_task);
     new_pid as isize
 }
 
@@ -78,9 +78,9 @@ pub fn sys_exec(path: *const u8, mut args: *const usize) -> isize {
     }
     if let Some(app_inode) = open_file(path.as_str(), OpenFlags::RDONLY) {
         let all_data = app_inode.read_all();
-        let task = current_task().unwrap();
+        let process = current_process();
         let argc = args_vec.len();
-        task.exec(all_data.as_slice(), args_vec);
+        process.exec(all_data.as_slice(), args_vec);
         // return argc because cx.x[10] will be covered with it later
         // 系统调用的返回值会被替换到 cx.x[10] 中，所以这里要返回 argc，不然用户态拿不到 argc
         argc as isize
@@ -96,23 +96,21 @@ pub fn sys_exec(path: *const u8, mut args: *const usize) -> isize {
 /// 否则返回结束的子进程的进程 ID。
 /// syscall ID：260
 pub fn sys_waitpid(pid: isize, exit_code_ptr: *mut i32) -> isize {
-    let task = current_task().unwrap();
+    let process = current_process();
     // find a child process
 
-    // ---- access current TCB exclusively
-    let mut inner = task.inner_exclusive_access();
-    if inner
+    let mut inner = process.inner_exclusive_access();
+    if !inner
         .children
         .iter()
-        .find(|p| pid == -1 || pid as usize == p.getpid())
-        .is_none()
+        .any(|p| pid == -1 || pid as usize == p.getpid())
     {
         return -1;
-        // ---- stop exclusively accessing current TCB
+        // ---- stop exclusively accessing current PCB
     }
     let pair = inner.children.iter().enumerate().find(|(_, p)| {
         // ++++ temporarily access child PCB exclusively
-        p.inner_exclusive_access().is_zombie() && (pid == -1 || pid as usize == p.getpid())
+        p.inner_exclusive_access().is_zombie && (pid == -1 || pid as usize == p.getpid())
         // ++++ stop exclusively accessing child PCB
     });
     if let Some((idx, _)) = pair {
@@ -131,90 +129,14 @@ pub fn sys_waitpid(pid: isize, exit_code_ptr: *mut i32) -> isize {
     // ---- stop exclusively accessing current TCB automatically
 }
 
-fn check_sigaction_error(signal: SignalFlags, action: usize, old_action: usize) -> bool {
-    if action == 0
-        || old_action == 0
-        || signal == SignalFlags::SIGKILL
-        || signal == SignalFlags::SIGSTOP
-    {
-        true
-    } else {
-        false
-    }
-}
-/// 功能：为当前进程设置某种信号的处理函数，同时保存设置之前的处理函数。
-/// 参数：signum 表示信号的编号，action 表示要设置成的处理函数的指针
-/// old_action 表示用于保存设置之前的处理函数的指针。
-/// 返回值：如果传入参数错误（比如传入的 action 或 old_action 为空指针或者
-/// 信号类型不存在) 返回 -1 ，否则返回 0 。
-/// syscall ID: 134
-pub fn sys_sigaction(
-    signum: i32,
-    action: *const SignalAction,
-    old_action: *mut SignalAction,
-) -> isize {
-    let token = current_user_token();
-    let task = current_task().unwrap();
-    let mut inner = task.inner_exclusive_access();
-    if signum as usize > MAX_SIG {
-        return -1;
-    }
-    if let Some(flag) = SignalFlags::from_bits(1 << signum) {
-        if check_sigaction_error(flag, action as usize, old_action as usize) {
-            return -1;
-        }
-        let prev_action = inner.signal_actions.table[signum as usize];
-        // SignalAction对齐了16字节，不会有跨页的风险，所以可以直接写
-        *translated_refmut(token, old_action) = prev_action;
-        inner.signal_actions.table[signum as usize] = *translated_ref(token, action);
-        0
-    } else {
-        -1
-    }
-}
-
-pub fn sys_sigprocmask(mask: u32) -> isize {
-    if let Some(task) = current_task() {
-        let mut inner = task.inner_exclusive_access();
-        let old_mask = inner.signal_mask;
-        if let Some(flag) = SignalFlags::from_bits(mask) {
-            inner.signal_mask = flag;
-            old_mask.bits() as isize
-        } else {
-            -1
-        }
-    } else {
-        -1
-    }
-}
-
-pub fn sys_kill(pid: usize, signum: i32) -> isize {
-    if let Some(task) = pid2task(pid) {
-        if let Some(flag) = SignalFlags::from_bits(1 << signum) {
-            // insert the signal if legal
-            let mut task_ref = task.inner_exclusive_access();
-            if task_ref.signals.contains(flag) {
-                return -1;
-            }
-            task_ref.signals.insert(flag);
+pub fn sys_kill(pid: usize, signal: u32) -> isize {
+    if let Some(process) = pid2process(pid) {
+        if let Some(flag) = SignalFlags::from_bits(signal) {
+            process.inner_exclusive_access().signals |= flag;
             0
         } else {
             -1
         }
-    } else {
-        -1
-    }
-}
-
-pub fn sys_sigreturn() -> isize {
-    if let Some(task) = current_task() {
-        let mut inner = task.inner_exclusive_access();
-        inner.handling_sig = -1;
-        // restore the trap context
-        let trap_ctx = inner.get_trap_cx();
-        *trap_ctx = inner.trap_ctx_backup.unwrap();
-        // 原本的返回值是放在寄存器 x10（a0） 中的
-        trap_ctx.x[10] as isize
     } else {
         -1
     }

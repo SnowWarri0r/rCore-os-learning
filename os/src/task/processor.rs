@@ -7,7 +7,7 @@ use super::{
     context::TaskContext,
     manager::fetch_task,
     switch::__switch,
-    task::{TaskControlBlock, TaskStatus},
+    task::{TaskControlBlock, TaskStatus}, process::ProcessControlBlock,
 };
 
 pub struct Processor {
@@ -30,34 +30,51 @@ impl Processor {
         self.current.take()
     }
     pub fn current(&self) -> Option<Arc<TaskControlBlock>> {
-        self.current.as_ref().map(|task| Arc::clone(task))
+        self.current.as_ref().map(Arc::clone)
     }
     fn get_idle_task_cx_ptr(&mut self) -> *mut TaskContext {
         &mut self.idle_task_cx as *mut _
     }
 }
-
+/// 取出当前处理器正在执行的线程
 pub fn take_current_task() -> Option<Arc<TaskControlBlock>> {
     PROCESSOR.exclusive_access().take_current()
 }
-
+/// 当前线程控制块
 pub fn current_task() -> Option<Arc<TaskControlBlock>> {
     PROCESSOR.exclusive_access().current()
 }
-
+/// 当前进程控制块
+pub fn current_process() -> Arc<ProcessControlBlock> {
+    current_task().unwrap().process.upgrade().unwrap()
+}
+/// 当前进程地址空间satp
 pub fn current_user_token() -> usize {
     let task = current_task().unwrap();
-    let token = task.inner_exclusive_access().get_user_token();
-    token
+    task.get_user_token()
 }
-
+///当前线程Trap上下文
 pub fn current_trap_cx() -> &'static mut TrapContext {
     current_task()
         .unwrap()
         .inner_exclusive_access()
         .get_trap_cx()
 }
-
+/// 当前trap上下文在用户空间的虚拟地址
+pub fn current_trap_cx_user_va() -> usize {
+    current_task()
+        .unwrap()
+        .inner_exclusive_access()
+        .res
+        .as_ref()
+        .unwrap()
+        .trap_cx_user_va()
+}
+/// 当前线程内核栈栈顶
+pub fn current_kstack_top() -> usize {
+    current_task().unwrap().kstack.get_top()
+}
+/// CPU 的调度主循环
 pub fn run_tasks() {
     loop {
         let mut processor = PROCESSOR.exclusive_access();
@@ -75,9 +92,12 @@ pub fn run_tasks() {
             unsafe {
                 __switch(idle_task_cx_ptr, next_task_cx_ptr);
             }
+        } else {
+            println!("no tasks available in run_tasks");
         }
     }
 }
+
 // 保存当前进程上下文，提取下一个要运行的进程的上下文到寄存器，并恢复堆栈指针。
 pub fn schedule(switched_task_cx_ptr: *mut TaskContext) {
     let mut processor = PROCESSOR.exclusive_access();

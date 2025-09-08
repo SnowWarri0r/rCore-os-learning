@@ -3,7 +3,7 @@ use lazy_static::lazy_static;
 
 use crate::sync::UPSafeCell;
 
-use super::task::TaskControlBlock;
+use super::{task::{TaskControlBlock, TaskStatus}, process::ProcessControlBlock};
 
 pub struct TaskManager {
     ready_queue: VecDeque<Arc<TaskControlBlock>>,
@@ -22,33 +22,56 @@ impl TaskManager {
     pub fn fetch(&mut self) -> Option<Arc<TaskControlBlock>> {
         self.ready_queue.pop_front()
     }
+    pub fn remove(&mut self, task: Arc<TaskControlBlock>) {
+        if let Some((id, _)) = self
+            .ready_queue
+            .iter()
+            .enumerate()
+            .find(|(_, t)| Arc::as_ptr(t) == Arc::as_ptr(&task))
+        {
+            self.ready_queue.remove(id);
+        }
+    }
 }
 
 lazy_static! {
+    /// 全局任务管理器 TASK_MANAGER
     pub static ref TASK_MANAGER: UPSafeCell<TaskManager> =
         unsafe { UPSafeCell::new(TaskManager::new()) };
-    pub static ref PID2TCB: UPSafeCell<BTreeMap<usize, Arc<TaskControlBlock>>> =
+    /// 全局 PID-进程控制块映射 PID2PCB
+    pub static ref PID2PCB: UPSafeCell<BTreeMap<usize, Arc<ProcessControlBlock>>> =
         unsafe { UPSafeCell::new(BTreeMap::new()) };
 }
-// 添加进程到就绪队列
+/// 将线程加入就绪队列
 pub fn add_task(task: Arc<TaskControlBlock>) {
-    PID2TCB
-        .exclusive_access()
-        .insert(task.getpid(), Arc::clone(&task));
     TASK_MANAGER.exclusive_access().add(task);
 }
-
+pub fn wakeup_task(task: Arc<TaskControlBlock>) {
+    let mut task_inner = task.inner_exclusive_access();
+    task_inner.task_status = TaskStatus::Ready;
+    drop(task_inner);
+    add_task(task);
+}
+/// 将线程移除出就绪队列
+pub fn remove_task(task: Arc<TaskControlBlock>) {
+    TASK_MANAGER.exclusive_access().remove(task);
+}
+/// 从就绪队列中选出一个线程分配 CPU 资源
 pub fn fetch_task() -> Option<Arc<TaskControlBlock>> {
     TASK_MANAGER.exclusive_access().fetch()
 }
-
-pub fn pid2task(pid: usize) -> Option<Arc<TaskControlBlock>> {
-    let map = PID2TCB.exclusive_access();
+/// 根据 PID 查询进程控制块
+pub fn pid2process(pid: usize) -> Option<Arc<ProcessControlBlock>> {
+    let map = PID2PCB.exclusive_access();
     map.get(&pid).map(Arc::clone)
 }
-
-pub fn remove_from_pid2task(pid: usize) {
-    let mut map = PID2TCB.exclusive_access();
+/// 增加一对 PID-进程控制块映射
+pub fn insert_into_pid2process(pid: usize, process: Arc<ProcessControlBlock>) {
+    PID2PCB.exclusive_access().insert(pid, process);
+}
+/// 删除一对 PID-进程控制块映射
+pub fn remove_from_pid2process(pid: usize) {
+    let mut map = PID2PCB.exclusive_access();
     if map.remove(&pid).is_none() {
         panic!("cannot find pid {} in pid2task!", pid);
     }

@@ -42,9 +42,9 @@ impl PipeRingBuffer {
         }
         c
     }
-    pub fn write_byte(&mut self, c: u8) {
+    pub fn write_byte(&mut self, byte: u8) {
         self.status = RingBufferStatus::Normal;
-        self.arr[self.tail] = c;
+        self.arr[self.tail] = byte;
         self.tail = (self.tail + 1) % RING_BUFFER_SIZE;
         if self.tail == self.head {
             self.status = RingBufferStatus::Full;

@@ -1,13 +1,13 @@
 mod context;
 
 use crate::{
-    config::{TRAMPOLINE, TRAP_CONTEXT},
+    config::{TRAMPOLINE, TRAP_CONTEXT_BASE},
     syscall::*,
     task::{
-        current_trap_cx, current_user_token, exit_current_and_run_next,
-        suspend_current_and_run_next, SignalFlags, handle_signals, check_signals_error_of_current, current_add_signal,
+        check_signals_of_current, current_add_signal, current_trap_cx, current_user_token,
+        exit_current_and_run_next, suspend_current_and_run_next, SignalFlags, current_trap_cx_user_va,
     },
-    timer::set_next_trigger,
+    timer::{set_next_trigger, check_timer},
 };
 use core::arch::{asm, global_asm};
 use riscv::register::{
@@ -36,13 +36,15 @@ fn set_user_trap_entry() {
 
 #[no_mangle]
 pub fn trap_from_kernel() -> ! {
-    panic!("a trap from kernel!");
+    use riscv::register::sepc;
+    println!("stval = {:#x}, sepc = {:#x}", stval::read(), sepc::read());
+    panic!("a trap {:?} from kernel!", scause::read().cause());
 }
 
 #[no_mangle]
 pub fn trap_return() -> ! {
     set_user_trap_entry();
-    let trap_cx_ptr = TRAP_CONTEXT;
+    let trap_cx_ptr = current_trap_cx_user_va();
     let user_satp = current_user_token();
     extern "C" {
         fn __alltraps();
@@ -83,28 +85,25 @@ pub fn trap_handler() -> ! {
         }
         Trap::Interrupt(Interrupt::SupervisorTimer) => {
             set_next_trigger();
+            check_timer();
             suspend_current_and_run_next();
         }
-        Trap::Exception(Exception::StoreFault) |
-        Trap::Exception(Exception::StorePageFault) |
-        Trap::Exception(Exception::InstructionFault) |
-        Trap::Exception(Exception::InstructionPageFault) |
-        Trap::Exception(Exception::LoadFault) |
-        Trap::Exception(Exception::LoadPageFault) => {
+        Trap::Exception(Exception::StoreFault)
+        | Trap::Exception(Exception::StorePageFault)
+        | Trap::Exception(Exception::InstructionFault)
+        | Trap::Exception(Exception::InstructionPageFault)
+        | Trap::Exception(Exception::LoadFault)
+        | Trap::Exception(Exception::LoadPageFault) => {
             // println!(
             //     "[kernel] {:?} in application, bad addr = {:#x}, bad instruction = {:#x}, core dumped.",
             //     scause.cause(),
             //     stval,
             //     current_trap_cx().sepc,
             // );
-            // // page fault exit code
-            // exit_current_and_run_next(-2);
             current_add_signal(SignalFlags::SIGSEGV);
         }
         Trap::Exception(Exception::IllegalInstruction) => {
             // println!("[kernel] IllegalInstruction in application, core dumped.");
-            // // illegal instruction exit code
-            // exit_current_and_run_next(-3);
             current_add_signal(SignalFlags::SIGILL);
         }
         _ => {
@@ -117,9 +116,8 @@ pub fn trap_handler() -> ! {
     }
     // handle signals (handle the sent signal)
     //println!("[K] trap_handler:: handle_signals");
-    handle_signals();
     // check error signals (if error then exit)
-    if let Some((errno, msg)) = check_signals_error_of_current() {
+    if let Some((errno, msg)) = check_signals_of_current() {
         println!("[kernel] {}", msg);
         exit_current_and_run_next(errno);
     }
